@@ -1,5 +1,5 @@
 // ==========================================================================
-// ⚙️ 全互动式华文教学系统阅读器大脑 - script.js (完整版：文本赏析 + maxWords 动态读取)
+// ⚙️ 全互动式华文教学系统阅读器大脑 - script.js (2026 提交即时变绿版)
 // ==========================================================================
 
 let currentIdx = -1; 
@@ -7,18 +7,19 @@ let saved = JSON.parse(localStorage.getItem('saved_104')) || [];
 let quizData = [];
 let currentQuizIdx = 0;
 let isLocked = false;
-let isTeacherMode = false;  // 文本赏析状态开关
+let isTeacherMode = false; // 文本赏析状态开关
+let userSelectedAnswers = {}; // 存储学生当前选中的临时答案 (格式： { 题目ID: "选中的选项完整文本" })
 
 window.onload = function() {
     // 初始化网页标题
     document.getElementById('articleTitle').innerText = lessonTitle;
     document.title = lessonTitle;
 
-    // 渲染课文、生词本和习题
+    // 渲染课文基底、生词本和选择题
     if (typeof lessonData !== 'undefined') { 
         render(); 
         renderNB(); 
-        renderQuestions(); 
+        renderMultipleChoiceQuizzes(); 
     }
     
     // 初始化气泡弹窗事件，点击空白处自动收回激活状态
@@ -29,7 +30,7 @@ window.onload = function() {
     });
 };
 
-// 📖 正文渲染器：完美支持华文首行空两格，且将灰色段号悬浮在左侧白边
+// 📖 正文渲染器：支持华文首行空两格，并为深度文本赏析预留 DOM 节点
 function render() {
     const cnt = document.getElementById('content'); 
     cnt.innerHTML = "";
@@ -47,7 +48,7 @@ function render() {
             topAnalysis.style.display = "none";
         }
     }
-    
+
     function finalizeParagraph(paragraphElement) {
         if (paragraphElement.childNodes.length === 0) return;
         const textContent = paragraphElement.innerText.trim();
@@ -61,7 +62,6 @@ function render() {
             paragraphElement.style.marginTop = "30px";    
             cnt.appendChild(paragraphElement);
         } else {
-            // 恢复最纯正的华文首行缩进空两格
             paragraphElement.style.position = "relative";
             paragraphElement.style.textIndent = "2em"; 
             paragraphElement.style.paddingLeft = "0"; 
@@ -70,8 +70,6 @@ function render() {
             let s = document.createElement("span");
             s.className = "p-index";
             s.innerText = "第" + pNum + "段";
-            
-            // 负边距反向外推，让段落编号挂在文章外面，绝不顶歪正文第一行的拼音
             s.style.position = "absolute";
             s.style.left = "-55px"; 
             s.style.top = "4px"; 
@@ -110,7 +108,7 @@ function render() {
                 e.stopPropagation(); 
                 document.querySelectorAll('ruby').forEach(x=>x.classList.remove('is-active')); 
                 r.classList.add('is-active'); 
-                openPop(e.currentTarget, i); // 单击生词弹窗，同时触发 CSS 显现单个拼音
+                openPop(e.currentTarget, i);
             };
             r.innerHTML = `${d[0]}<rt>${d[1]}</rt>`; 
             p.appendChild(r);
@@ -119,235 +117,97 @@ function render() {
     finalizeParagraph(p);
 }
 
-// 🧠 核心习题区：支持概述背景卡片，并对接 DeepSeek 黄金三行阅卷引擎
-function renderQuestions() {
-    if (typeof lessonQuestions === 'undefined' || lessonQuestions.length === 0) return;
+// 🎯 选择题渲染器
+function renderMultipleChoiceQuizzes() {
+    if (typeof quizDataList === 'undefined' || quizDataList.length === 0) return;
+    
+    const section = document.getElementById('quizSection');
+    const container = document.getElementById('quizContainer');
+    container.innerHTML = "";
+    section.style.display = "block"; 
+    
+    userSelectedAnswers = {};
+    document.getElementById('quizResultScore').style.display = "none";
 
-    const cnt = document.getElementById('content');
-    const qCard = document.createElement("div");
-    qCard.style.marginTop = "40px";
-    qCard.style.padding = "25px";
-    qCard.style.borderTop = "2px dashed #bdc3c7";
-    qCard.style.background = "var(--card-bg, #ffffff)";
-    qCard.style.borderRadius = "12px";
+    // 恢复控制按钮的初始显隐状态
+    document.getElementById('submitQuizBtn').style.display = "inline-block";
+    document.getElementById('submitQuizBtn').disabled = false;
+    document.getElementById('submitQuizBtn').innerText = "提交检查 🚀";
+    
+    document.getElementById('retryQuizBtn').style.display = "none";
+    document.getElementById('showCorrectBtn').style.display = "none";
 
-    const qTitle = document.createElement("h2");
-    qTitle.innerText = "📚 课后思考与 AI 智能练习";
-    qTitle.style.fontSize = "20px";
-    qTitle.style.color = "#2c3e50";
-    qTitle.style.marginBottom = "20px";
-    qCard.appendChild(qTitle);
+    quizDataList.forEach((q) => {
+        const qBox = document.createElement('div');
+        qBox.style.marginBottom = "25px";
+        qBox.style.paddingBottom = "15px";
+        qBox.style.borderBottom = "1px dashed #ddd";
+        qBox.setAttribute("data-q-id", q.id);
 
-    lessonQuestions.forEach((q) => {
-        const qBox = document.createElement("div");
-        qBox.style.marginBottom = "30px";
-        qBox.style.paddingBottom = "20px";
-        qBox.style.borderBottom = "1px dashed #eee";
-
-        const qText = document.createElement("div");
-        qText.innerHTML = `<strong>${q.number}</strong> ${q.question} <span style="color:#e74c3c; font-weight:bold;">[${q.score}分]</span>`;
+        const qText = document.createElement('div');
+        qText.style.fontWeight = "bold";
         qText.style.fontSize = "16px";
+        qText.style.marginBottom = "10px";
+        qText.innerHTML = `${q.id}. ${q.question.replace(/\n/g, '<br>')}`;
         qBox.appendChild(qText);
 
-        // 如果题目配有 context 背景文本（如概述题），在前端生成高质感的紫色引用卡片
-        if (q.context) {
-            const contextBox = document.createElement("div");
-            contextBox.innerHTML = q.context.replace(/\n/g, '<br>');
-            contextBox.style.background = "#f8f9fa";
-            contextBox.style.borderLeft = "4px solid #9b59b6";
-            contextBox.style.padding = "15px";
-            contextBox.style.margin = "12px 0";
-            contextBox.style.fontSize = "15px";
-            contextBox.style.color = "#34495e";
-            contextBox.style.lineHeight = "1.6";
-            contextBox.style.borderRadius = "4px";
-            qBox.appendChild(contextBox);
+        // 👁️ 题目分析节点预渲染
+        if (q.teacherAnalysis) {
+            let qAnalysis = document.createElement("div");
+            qAnalysis.id = `q-analysis-${q.id}`;
+            qAnalysis.style.padding = "8px 12px";
+            qAnalysis.style.marginBottom = "10px";
+            qAnalysis.style.fontSize = "13px";
+            qAnalysis.style.borderRadius = "4px";
+            qAnalysis.innerHTML = `<strong>📐 设题意图与核心考点：</strong>${q.teacherAnalysis}`;
+            
+            qAnalysis.style.display = isTeacherMode ? "block" : "none";
+            qBox.appendChild(qAnalysis);
         }
 
-        const textarea = document.createElement("textarea");
-        // 🔥 从 q.maxWords 读取字数限制，默认 70 字
-        const maxWords = q.maxWords || 70;
-        textarea.placeholder = (q.type && q.type === "summary") 
-            ? `请在此处输入您的概述答案（注意不超过${maxWords}字）...` 
-            : "请在此处输入您的答案...";
-        textarea.style.width = "100%";
-        textarea.style.height = (q.type && q.type === "summary") ? "110px" : "80px";
-        textarea.style.padding = "10px";
-        textarea.style.marginTop = "10px";
-        textarea.style.boxSizing = "border-box";
-        textarea.style.borderRadius = "6px";
-        textarea.style.border = "1px solid #ccc";
-        textarea.style.fontSize = "15px";
-        textarea.style.fontFamily = "inherit";
+        const oBox = document.createElement('div');
+        oBox.className = "options-group";
+        
+        let pureContents = q.options.map(opt => opt.replace(/^[A-D]\s+/, ""));
+        let shuffledContents = [...pureContents].sort(() => Math.random() - 0.5);
+        const prefixes = ["A", "B", "C", "D"];
 
-        textarea.value = localStorage.getItem(`ans_${q.id}`) || "";
-        qBox.appendChild(textarea);
+        shuffledContents.forEach((content, index) => {
+            const prefix = prefixes[index];
+            const finalOptText = `${prefix} ${content}`;
 
-        const controlRow = document.createElement("div");
-        controlRow.style.display = "flex";
-        controlRow.style.justify = "space-between";
-        controlRow.style.alignItems = "center";
-        controlRow.style.marginTop = "8px";
+            const btn = document.createElement('button');
+            btn.innerText = finalOptText;
+            btn.className = "quiz-choice-btn";
+            
+            const originalMatch = q.options.find(o => o.replace(/^[A-D]\s+/, "") === content);
+            btn.setAttribute("data-original-text", originalMatch || finalOptText);
 
-        const counter = document.createElement("div");
-        counter.style.fontSize = "13px";
-        counter.style.color = "#7f8c8d";
-        if (q.type && q.type === "summary") {
-            // 🔥 动态显示 maxWords
-            counter.innerHTML = `当前字数：<span id="charCount_${q.id}">0</span> / ${maxWords} 字`;
-        }
-        controlRow.appendChild(counter);
+            btn.style.display = "block";
+            btn.style.width = "100%";
+            btn.style.textAlign = "left";
+            btn.style.margin = "6px 0";
+            btn.style.padding = "10px 15px";
+            btn.style.borderRadius = "6px";
+            btn.style.cursor = "pointer";
+            btn.style.fontSize = "14px";
 
-        const btnGroup = document.createElement("div");
-
-        const aiBtn = document.createElement("button");
-        aiBtn.innerText = "🤖 AI 批改结果";
-        aiBtn.style.padding = "6px 12px";
-        aiBtn.style.background = "#9b59b6";
-        aiBtn.style.color = "white";
-        aiBtn.style.border = "none";
-        aiBtn.style.borderRadius = "4px";
-        aiBtn.style.cursor = "pointer";
-        aiBtn.style.fontSize = "13px";
-        aiBtn.style.marginRight = "8px";
-        btnGroup.appendChild(aiBtn);
-
-        const submitBtn = document.createElement("button");
-        submitBtn.innerText = "查看满分答案 📋";
-        submitBtn.style.padding = "6px 12px";
-        submitBtn.style.background = "#2ecc71";
-        submitBtn.style.color = "white";
-        submitBtn.style.border = "none";
-        submitBtn.style.borderRadius = "4px";
-        submitBtn.style.cursor = "pointer";
-        submitBtn.style.fontSize = "13px";
-        btnGroup.appendChild(submitBtn);
-
-        controlRow.appendChild(btnGroup);
-        qBox.appendChild(controlRow);
-
-        const ansBox = document.createElement("div");
-        ansBox.style.display = "none";
-        ansBox.style.marginTop = "15px";
-        ansBox.style.padding = "12px";
-        ansBox.style.background = "#fff9db";
-        ansBox.style.borderLeft = "4px solid #f1c40f";
-        ansBox.style.borderRadius = "4px";
-        ansBox.style.fontSize = "14px";
-        ansBox.innerHTML = `<strong>💡 满分答案：</strong><br><div style="margin-top:6px; color:#2c3e50; font-weight:500;">${q.modelAnswer}</div>`;
-        qBox.appendChild(ansBox);
-
-        const aiBox = document.createElement("div");
-        aiBox.style.display = "none";
-        aiBox.style.marginTop = "15px";
-        aiBox.style.padding = "12px";
-        aiBox.style.background = "#ebf5fb";
-        aiBox.style.borderLeft = "4px solid #3498db";
-        aiBox.style.borderRadius = "4px";
-        aiBox.style.fontSize = "14px";
-        qBox.appendChild(aiBox);
-
-        submitBtn.onclick = function() {
-            ansBox.style.display = ansBox.style.display === "none" ? "block" : "none";
-            submitBtn.innerText = ansBox.style.display === "block" ? "收起满分答案 ❌" : "查看满分答案 📋";
-        };
-
-        // 🚀 DeepSeek 黄金三行超强智审引擎
-        aiBtn.onclick = async function() {
-            const studentAns = textarea.value.trim();
-            if (!studentAns) { alert("请先输入您的作答哦！"); return; }
-
-            let apiKey = localStorage.getItem("gemini_api_key");
-            if (!apiKey) {
-                apiKey = prompt("🤖 首次使用请输入您的 DeepSeek API Key:");
-                if (!apiKey) return;
-                localStorage.setItem("gemini_api_key", apiKey.trim());
-            }
-
-            aiBox.style.display = "block";
-            aiBox.innerHTML = "<span style='color:#34495e;'>⏳ AI 老师正在阅卷中，请稍候...</span>";
-            aiBtn.disabled = true;
-
-            const promptText = `请严格根据标准批改学生的华文作答。
-【题目】：${q.number} ${q.question} [满分 ${q.score} 分]
-【满分答案】：${q.modelAnswer}
-【学生作答】：“${studentAns}”
-
-⚠️ 【输出格式模板（严禁自行添加任何多余的汉字、前言或总结语）】：
-【最终得分】：X / ${q.score} 分
-【答对】：[请列出写对的要点]
-【错漏】：[请列出漏掉或写错的要点]
-
-* 提示：语意对即可，允许近义词。若字数格式不符，在此处直接说明。`;
-
-            try {
-                const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "Authorization": "Bearer " + apiKey
-                    },
-                    body: JSON.stringify({
-                        model: "deepseek-chat",
-                        messages: [
-                            { role: "system", content: "你是一位精炼、古板、绝不吐露废字的阅卷考官。你只允许严格按照提供给你的三行格式模板输出，绝对禁止自行添加任何多余的汉字、前言或总结语。" },
-                            { role: "user", content: promptText }
-                        ],
-                        stream: false
-                    })
+            btn.onclick = () => {
+                if (btn.disabled) return;
+                
+                Array.from(oBox.children).forEach(b => {
+                    b.classList.remove('selected');
                 });
 
-                if (!response.ok) {
-                    const errData = await response.json();
-                    throw new Error(errData.error ? errData.error.message : "连接网关拒绝");
-                }
+                btn.classList.add('selected');
+                userSelectedAnswers[q.id] = originalMatch || finalOptText;
+            };
+            oBox.appendChild(btn);
+        });
 
-                const data = await response.json();
-                if (data && data.choices && data.choices[0].message.content) {
-                    let aiReply = data.choices[0].message.content;
-                    let formattedReply = aiReply
-                        .replace(/【最终得分】：/g, '<strong>【最终得分】：</strong>')
-                        .replace(/【答对】：/g, '<strong>【答对】：</strong>')
-                        .replace(/【错漏】：/g, '<strong>【错漏】：</strong>')
-                        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-
-                    aiBox.innerHTML = `<strong>🤖 AI 老师批改结果：</strong><br><div style="margin-top:8px; white-space: pre-line; line-height:1.6; color:#2c3e50;">${formattedReply}</div>`;
-                } else {
-                    throw new Error("数据异常。");
-                }
-            } catch (err) {
-                aiBox.innerHTML = `<span style='color:#e74c3c;'>❌ 批改失败，请重试。</span>`;
-                console.error(err);
-            } finally {
-                aiBtn.disabled = false;
-            }
-        };
-
-        function updateCharCount() {
-            if (q.type && q.type === "summary") {
-                const text = textarea.value;
-                const matched = text.match(/[\u4e00-\u9fa5\w\d\u3000-\u303f\uff00-\uffef]/g);
-                const count = matched ? matched.length : 0;
-                const countEl = document.getElementById(`charCount_${q.id}`);
-                if (countEl) {
-                    countEl.innerText = count;
-                    // 🔥 动态读取 maxWords 判断超限
-                    const maxWords = q.maxWords || 70;
-                    countEl.style.color = count > maxWords ? "#e74c3c" : "#27ae60";
-                }
-            }
-        }
-
-        textarea.oninput = function() {
-            localStorage.setItem(`ans_${q.id}`, textarea.value);
-            updateCharCount();
-        };
-        setTimeout(updateCharCount, 100);
-
-        qCard.appendChild(qBox);
+        qBox.appendChild(oBox);
+        container.appendChild(qBox);
     });
-
-    cnt.appendChild(qCard);
 }
 
 // 👁️ 控制开关：切换文本赏析面板
@@ -378,9 +238,114 @@ function toggleTeacherMode() {
     pPanels.forEach(panel => {
         panel.style.display = isTeacherMode ? "block" : "none";
     });
+
+    quizDataList.forEach(q => {
+        const qPanel = document.getElementById(`q-analysis-${q.id}`);
+        if (qPanel) {
+            qPanel.style.display = isTeacherMode ? "block" : "none";
+        }
+    });
 }
 
-// ==================== 🛠️ 独立字词高精准字典解释弹窗核心逻辑 ============================
+// ==================== 🎯 错题隐藏式批改控制引擎 ====================
+function submitAndShowWrongOnly() {
+    const totalQuestions = quizDataList.length;
+    const answeredCount = Object.keys(userSelectedAnswers).length;
+
+    if (answeredCount < totalQuestions) {
+        alert(`⚠️ 老师发现你还有未填完的习题哦！目前完成了 (${answeredCount} / ${totalQuestions}) 题。`);
+        return;
+    }
+
+    let score = 0;
+
+    quizDataList.forEach(q => {
+        const qBox = document.querySelector(`div[data-q-id="${q.id}"]`);
+        const buttons = qBox.querySelectorAll('.quiz-choice-btn');
+        const studentOriginalText = userSelectedAnswers[q.id];
+
+        let selectedBtn = null;
+        buttons.forEach(btn => {
+            if (btn.getAttribute("data-original-text") === studentOriginalText) { selectedBtn = btn; }
+        });
+
+        const studentLetter = studentOriginalText.trim().charAt(0);
+
+        buttons.forEach(btn => {
+            btn.disabled = true; 
+            btn.style.boxShadow = "none";
+
+            // 🟢 核心改动：如果学生这道题做【对】了 -> 提交时立刻赋予 correct-answer-hint 类名，瞬间切换为精美浅绿肤色！
+            if (btn === selectedBtn && studentLetter === q.answer) {
+                if (!btn.innerText.includes("  (✅)")) {
+                    btn.innerText = btn.innerText + "  (✅)";
+                }
+                btn.classList.add('correct-answer-hint');
+                btn.style.fontWeight = "bold";
+            }
+
+            // 如果学生做【错】了 -> 将学生的错项独立强染红底白字
+            if (btn === selectedBtn && studentLetter !== q.answer) {
+                btn.style.background = "#e74c3c";
+                btn.style.color = "white";
+                btn.style.borderColor = "#e74c3c";
+                if (!btn.innerText.includes("  (❌️)")) btn.innerText = btn.innerText + "  (❌️)";
+            }
+        });
+
+        if (studentLetter === q.answer) { score++; }
+    });
+
+    const resultBox = document.getElementById('quizResultScore');
+    resultBox.style.display = "block";
+    resultBox.innerHTML = `🎉 批改完成！您的当前得分是：<span style="font-size: 24px; color: #e67e22;">${score}</span> / ${totalQuestions} 分<br><small style="font-size:14px; font-weight:normal; color:#7f8c8d;">发现错题了？可以点击【重新作答】再试一次，或者点击【查看正确答案】。</small>`;
+    
+    document.getElementById('submitQuizBtn').style.display = "none";
+    document.getElementById('retryQuizBtn').style.display = "inline-block";
+    document.getElementById('showCorrectBtn').style.display = "inline-block";
+
+    resultBox.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function retryQuizAnswers() {
+    renderMultipleChoiceQuizzes();
+    document.getElementById('quizResultScore').style.display = "none";
+    document.getElementById('retryQuizBtn').style.display = "none";
+    document.getElementById('showCorrectBtn').style.display = "none";
+    
+    document.getElementById('submitQuizBtn').style.display = "inline-block";
+    document.getElementById('submitQuizBtn').disabled = false;
+    document.getElementById('submitQuizBtn').innerText = "提交检查 🚀";
+}
+
+// 揭晓真正的谜底（点击查看正确答案按钮触发）
+function revealRealCorrectAnswers() {
+    quizDataList.forEach(q => {
+        const qBox = document.querySelector(`div[data-q-id="${q.id}"]`);
+        const buttons = qBox.querySelectorAll('.quiz-choice-btn');
+
+        buttons.forEach(btn => {
+            const btnOriginalText = btn.getAttribute("data-original-text");
+            const btnLetter = btnOriginalText ? btnOriginalText.trim().charAt(0) : btn.innerText.trim().charAt(0); 
+
+            if (btnLetter === q.answer) {
+                // 清洗机制：先洗干净文本后缀，防重复
+                let currentText = btn.innerText;
+                currentText = currentText.replace("  (✅)", "").replace(" (✅)", "");
+                
+                // 重新追加一个打勾小标并加粗
+                btn.innerText = currentText + "  (✅)";
+                btn.style.fontWeight = "bold";
+                
+                // 把正确答案全部染成浅绿皮肤（之前没做对的正确项，此时也会同步优雅亮绿）
+                btn.classList.add('correct-answer-hint');
+            }
+        });
+    });
+    document.getElementById('showCorrectBtn').style.display = "none";
+}
+
+// ==================== 🛠 *字词字典弹窗核心逻辑 ============================
 function openPop(el, i) {
     currentIdx = i; const d = lessonData[i];
     document.getElementById('popWord').innerText = d[0];
@@ -427,10 +392,17 @@ function renderNB() {
         saved.forEach(idx => { 
             const item = lessonData[idx]; 
             if(!item) return; 
+            
             const div = document.createElement("div"); 
             div.className = "notebook-item"; 
-            div.innerText = item[0]; 
-            div.onclick = (e) => { 
+            div.style.display = "inline-flex";
+            div.style.alignItems = "center";
+            div.style.gap = "6px";
+            div.style.cursor = "pointer";
+
+            const textSpan = document.createElement("span");
+            textSpan.innerText = item[0];
+            textSpan.onclick = (e) => { 
                 e.stopPropagation(); 
                 const target = document.querySelector(`ruby[data-word-index="${idx}"]`); 
                 if(target) { 
@@ -442,13 +414,44 @@ function renderNB() {
                     }, 500); 
                 } 
             }; 
+            div.appendChild(textSpan);
+
+            const deleteBtn = document.createElement("span");
+            deleteBtn.innerText = "×";
+            deleteBtn.style.color = "#e74c3c";
+            deleteBtn.style.fontWeight = "bold";
+            deleteBtn.style.padding = "0 2px";
+            deleteBtn.style.cursor = "pointer";
+            deleteBtn.style.borderRadius = "50%";
+            deleteBtn.style.transition = "all 0.2s";
+            
+            deleteBtn.onmouseenter = () => { deleteBtn.style.background = "#fce4e4"; };
+            deleteBtn.onmouseleave = () => { deleteBtn.style.background = "transparent"; };
+            
+            deleteBtn.onclick = (e) => {
+                e.stopPropagation(); 
+                removeSingleWordFromNotebook(idx);
+            };
+            div.appendChild(deleteBtn);
+
             list.appendChild(div); 
         }); 
     } 
 }
 
+function removeSingleWordFromNotebook(idx) {
+    saved = saved.filter(savedIdx => savedIdx !== idx);
+    localStorage.setItem('saved_104', JSON.stringify(saved)); 
+    renderNB(); 
+    if (saved.length === 0) {
+        document.getElementById('gameContainer').style.display = 'none'; 
+        document.getElementById('gameToggleBtn').innerText = "🎯 生词测试";
+    }
+}
+
+// 游戏重载
 function forceClearNotebook() { localStorage.removeItem('saved_104'); saved = []; renderNB(); document.getElementById('gameContainer').style.display = 'none'; document.getElementById('gameToggleBtn').innerText = "🎯 生词测试"; }
-function toggleGameMode() { const container = document.getElementById('gameContainer'); const btn = document.getElementById('gameToggleBtn'); if (container.style.display === 'block') { container.style.display = 'none'; btn.innerText = "🎯 生词测试"; } else { if (saved.length < 1) { alert("生词本是空的哦！"); return; } container.style.display = 'block'; btn.innerText = "📖 返回课文"; startQuizGame(); container.scrollIntoView({behavior: "smooth"}); } }
+function toggleGameMode() { const container = document.getElementById('gameContainer'); const btn = document.getElementById('gameToggleBtn'); if (container.style.display === 'block') { container.style.display = 'none'; btn.innerText = "🎯 生词测试"; } else { if (saved.length < 1) { alert("生词本是空的哦！要先在正文里点生词进行 Copy 收集！"); return; } container.style.display = 'block'; btn.innerText = "📖 返回课文"; startQuizGame(); container.scrollIntoView({behavior: "smooth"}); } }
 function startQuizGame() { quizData = [...saved].sort(() => Math.random() - 0.5); currentQuizIdx = 0; loadQuestion(); }
 
 function loadQuestion() { 
